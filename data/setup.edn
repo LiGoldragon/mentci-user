@@ -1,0 +1,11 @@
+{:textHash ""
+ :userConfigPath ".mentci/user.json"
+ :requiredEnvVars [
+   {:name "GEMINI_API_KEY"
+    :defaultMethod "gopass"
+    :defaultPath "Mentci-AI/google/Goldragon-Key-v1"}
+   {:name "LINKUP_API_KEY"
+    :defaultMethod "gopass"
+    :defaultPath "Mentci-AI/linkup.so/Goldragon-Key-v1"}
+ ]
+}
