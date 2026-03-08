@@ -4,6 +4,9 @@
    {:name "GEMINI_API_KEY"
     :defaultMethod "gopass"
     :defaultPath "Mentci-AI/google/Goldragon-Key-v1"}
+   {:name "OPENAI_API_KEY"
+    :defaultMethod "gopass"
+    :defaultPath "Mentci-AI/openai/Goldragon-Key-v1"}
    {:name "LINKUP_API_KEY"
     :defaultMethod "gopass"
     :defaultPath "Mentci-AI/linkup.so/Goldragon-Key-v1"}
