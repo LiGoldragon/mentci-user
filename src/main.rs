@@ -1,13 +1,15 @@
 use anyhow::{Context, Result};
 use std::env;
 use std::fs::File;
+use std::io::BufReader;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use mentci_user::{load_local_config, mentci_user_capnp, resolve_secret};
+use mentci_user::{
+    load_local_config, load_user_profile, mentci_user_capnp, realize_env, EnvRequirement,
+};
 
 fn default_setup_bin_path() -> Result<PathBuf> {
     let mut candidates: Vec<PathBuf> = vec![];
@@ -36,32 +38,25 @@ fn default_setup_bin_path() -> Result<PathBuf> {
         .context("Failed to locate setup.bin. Provide explicit path or set MENTCI_USER_SETUP_BIN")
 }
 
-fn collect_env_values(
-    setup: mentci_user_capnp::user_setup_config::Reader<'_>,
-) -> Result<Vec<(String, String)>> {
-    let user_config_path = setup.get_user_config_path()?.to_string()?;
-    let local_config =
-        load_local_config(&user_config_path).unwrap_or_else(|_| mentci_user::UserLocalConfig { secrets: vec![] });
+fn default_profile_path(setup_bin: &Path) -> Option<PathBuf> {
+    let mut candidates = vec![];
 
-    let mut out = vec![];
-    let reqs = setup.get_required_env_vars()?;
-
-    for req in reqs.iter() {
-        let name = req.get_name()?.to_string()?;
-        let mut method = req.get_default_method()?.to_string()?;
-        let mut path = req.get_default_path()?.to_string()?;
-
-        if let Some(over) = local_config.secrets.iter().find(|s| s.name == name) {
-            method = over.method.clone();
-            path = over.path.clone();
-        }
-
-        if let Ok(Some(val)) = resolve_secret(&method, &path) {
-            out.push((name, val));
-        }
+    if let Ok(path) = env::var("MENTCI_USER_PROFILE_JSON") {
+        candidates.push(PathBuf::from(path));
     }
 
-    Ok(out)
+    if let Ok(repo_root) = env::var("MENTCI_REPO_ROOT") {
+        candidates.push(
+            Path::new(&repo_root)
+                .join("Components/mentci-user/data/user-profile.json"),
+        );
+    }
+
+    if let Some(parent) = setup_bin.parent() {
+        candidates.push(parent.join("user-profile.json"));
+    }
+
+    candidates.into_iter().find(|path| path.exists())
 }
 
 fn read_setup_message(setup_bin: &Path) -> Result<capnp::message::Reader<capnp::serialize::OwnedSegments>> {
@@ -86,6 +81,48 @@ fn read_setup_message(setup_bin: &Path) -> Result<capnp::message::Reader<capnp::
         .with_context(|| format!("Failed to open {}", setup_bin.display()))?;
     capnp::serialize::read_message(&mut file, capnp::message::ReaderOptions::new())
         .with_context(|| format!("Failed to read unpacked capnp message from {}", setup_bin.display()))
+}
+
+fn env_requirements_from_setup(
+    setup: mentci_user_capnp::user_setup_config::Reader<'_>,
+) -> Result<(String, Vec<EnvRequirement>)> {
+    let user_config_path = setup.get_user_config_path()?.to_string()?;
+    let requirements = setup
+        .get_required_env_vars()?
+        .iter()
+        .map(|req| {
+            Ok(EnvRequirement {
+                name: req.get_name()?.to_string()?,
+                default_method: req.get_default_method()?.to_string()?,
+                default_path: req.get_default_path()?.to_string()?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok((user_config_path, requirements))
+}
+
+fn collect_realized_env(
+    setup: mentci_user_capnp::user_setup_config::Reader<'_>,
+    setup_bin: &Path,
+) -> Result<Vec<(String, String)>> {
+    let (user_config_path, requirements) = env_requirements_from_setup(setup)?;
+    let local_config =
+        load_local_config(&user_config_path).unwrap_or_else(|_| mentci_user::UserLocalConfig { secrets: vec![] });
+    let profile = match default_profile_path(setup_bin) {
+        Some(path) => load_user_profile(path.to_string_lossy().as_ref())?,
+        None => mentci_user::UserProfile::default(),
+    };
+
+    let realized = realize_env(
+        &requirements,
+        &profile,
+        &local_config,
+        env::var("HOME").ok().as_deref(),
+        env::var("PATH").ok().as_deref(),
+    )?;
+
+    Ok(realized.into_iter().collect())
 }
 
 fn main() -> Result<()> {
@@ -125,7 +162,7 @@ fn main() -> Result<()> {
 
     let message_reader = read_setup_message(&setup_bin)?;
     let setup = message_reader.get_root::<mentci_user_capnp::user_setup_config::Reader>()?;
-    let env_values = collect_env_values(setup)?;
+    let env_values = collect_realized_env(setup, &setup_bin)?;
 
     if mode == "export-env" {
         for (name, val) in env_values {

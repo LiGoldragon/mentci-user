@@ -1,0 +1,13 @@
+{
+  "env": [
+    { "name": "GEMINI_API_KEY", "method": "env", "path": "GEMINI_API_KEY" },
+    { "name": "OPENAI_API_KEY", "method": "env", "path": "OPENAI_API_KEY" },
+    { "name": "LINKUP_API_KEY", "method": "env", "path": "LINKUP_API_KEY" }
+  ],
+  "shellVars": [
+    { "name": "MENTCI_USER_PROFILE_ACTIVE", "value": "1" }
+  ],
+  "pathAdditions": [
+    ".local/bin"
+  ]
+}
